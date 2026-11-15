@@ -6,7 +6,7 @@ OUT="${DORY_GATE_OUT:?set DORY_GATE_OUT}"; PORT="${DORY_GATE_PORT:-8092}"
 LONG=$(python -c "print(' '.join(['Paragraph %d: The committee reviewed the budget, the schedule and the staffing plan, then asked for a revised estimate.'%i for i in range(60)]) + ' Summarize the paragraphs above in two sentences.')")
 for mode in nf f; do
   if [ $mode = nf ]; then export GGML_VK_DISABLE_FUSION=1 GGML_VK_DISABLE_GRAPH_OPTIMIZE=1 GGML_VK_DISABLE_MULTI_ADD=1; else unset GGML_VK_DISABLE_FUSION GGML_VK_DISABLE_GRAPH_OPTIMIZE GGML_VK_DISABLE_MULTI_ADD; fi
-  "$SRV" -m "$GGUF" -ngl 999 -c 4096 --port $PORT --host 127.0.0.1 > "$OUT/$TAG-$mode.srv.log" 2>&1 & pid=$!
+  "$SRV" -m "$GGUF" -ngl "${DORY_GATE_NGL:-999}" -c 4096 --port $PORT --host 127.0.0.1 > "$OUT/$TAG-$mode.srv.log" 2>&1 & pid=$!
   for i in $(seq 90); do curl -sf localhost:$PORT/health >/dev/null && break; sleep 2; done
   for p in short long; do
     if [ $p = short ]; then P="Explain in three sentences why the sky is blue."; else P="$LONG"; fi

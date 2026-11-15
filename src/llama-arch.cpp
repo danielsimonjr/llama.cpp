@@ -258,6 +258,7 @@ static const std::map<llm_kv, const char *> LLM_KV_NAMES = {
     { LLM_KV_OUTPUT_LAYER_COUNT,                "%s.output_layer_count"                },
     { LLM_KV_RECURRENT_KV_CACHE_MODE,            "%s.recurrent_kv_cache_mode"            },
     { LLM_KV_SCALES_FOLDED,                      "%s.scales_folded"                      },
+    { LLM_KV_QK_NORM_FOLDED,                     "%s.qk_norm_folded"                     },
     { LLM_KV_LAYER_PATTERN,                     "%s.layer_pattern"                     },
     { LLM_KV_ROPE_PROFILE,                      "%s.rope.profile"                      },
     { LLM_KV_ROPE_FREQ_BASE_2,                   "%s.rope.freq_base_2"                   },
@@ -465,6 +466,7 @@ static const std::map<llm_tensor, const char *> LLM_TENSOR_NAMES = {
     { LLM_TENSOR_FFN_GATE_SCALE,                         "blk.%d.ffn_gate_scale" },
     { LLM_TENSOR_FFN_UP_SCALE,                           "blk.%d.ffn_up_scale" },
     { LLM_TENSOR_OUTPUT_SCALE,                          "output_scale" },
+    { LLM_TENSOR_DORY_NORM_SCALE,                      "dory_norm_scale" },
     { LLM_TENSOR_TOKEN_EMBD,                             "token_embd" },
     { LLM_TENSOR_OUTPUT_NORM,                            "output_norm" },
     { LLM_TENSOR_OUTPUT_NORM_LFM2,                       "token_embd_norm" }, // fix for wrong tensor name
@@ -778,6 +780,7 @@ static const std::map<llm_tensor, llm_tensor_info> LLM_TENSOR_INFOS = {
     {LLM_TENSOR_FFN_GATE_SCALE,             {LLM_TENSOR_LAYER_REPEATING, GGML_OP_MUL}},
     {LLM_TENSOR_FFN_UP_SCALE,               {LLM_TENSOR_LAYER_REPEATING, GGML_OP_MUL}},
     {LLM_TENSOR_OUTPUT_SCALE,              {LLM_TENSOR_LAYER_OUTPUT,    GGML_OP_MUL}},
+    {LLM_TENSOR_DORY_NORM_SCALE,           {LLM_TENSOR_LAYER_OUTPUT,    GGML_OP_MUL}},
     {LLM_TENSOR_TOKEN_EMBD,                 {LLM_TENSOR_LAYER_INPUT,     GGML_OP_GET_ROWS}},
     {LLM_TENSOR_POS_EMBD,                   {LLM_TENSOR_LAYER_INPUT,     GGML_OP_GET_ROWS}},
     {LLM_TENSOR_TOKEN_TYPES,                {LLM_TENSOR_LAYER_INPUT,     GGML_OP_GET_ROWS}},

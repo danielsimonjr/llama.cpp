@@ -152,6 +152,8 @@ struct llama_model_dory : public llama_model_base {
     std::string pattern;
     std::string recurrent_kv_cache_mode = "per_loop";
     bool scales_folded = false; // the GGUF holds the derived scale vectors in F32
+    bool qk_norm_folded = false; // attn_qk_scale also holds the 1/sqrt(head_dim) of the q norm
+    std::map<int64_t, ggml_tensor *> norm_scale; // 1/sqrt(n) vectors, keyed by length n
     std::vector<uint32_t> profile;
     std::vector<int> physical;
     std::vector<int> cache_layer;

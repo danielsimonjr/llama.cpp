@@ -9,6 +9,7 @@ void llama_model_dory::load_arch_hparams(llama_model_loader & ml) {
     ml.get_key(LLM_KV_NUM_LOOPS, n_loops);
     ml.get_key(LLM_KV_RECURRENT_KV_CACHE_MODE, recurrent_kv_cache_mode, false);
     ml.get_key(LLM_KV_SCALES_FOLDED, scales_folded, false);
+    ml.get_key(LLM_KV_QK_NORM_FOLDED, qk_norm_folded, false);
     if (recurrent_kv_cache_mode != "per_loop" && recurrent_kv_cache_mode != "last_loop") {
         throw std::runtime_error("Dory recurrent_kv_cache_mode must be per_loop or last_loop");
     }
@@ -86,6 +87,16 @@ void llama_model_dory::load_arch_tensors(llama_model_loader &) {
     tok_embd = create_tensor(tn(LLM_TENSOR_TOKEN_EMBD, "weight"), {n_embd, n_vocab}, 0);
     output = create_tensor(tn(LLM_TENSOR_OUTPUT, "weight"), {n_embd, n_vocab}, 0);
     logit_scale = create_tensor(tn(LLM_TENSOR_OUTPUT_SCALE, "weight"), {n_vocab}, 0);
+    if (scales_folded) {
+        for (int64_t n : {(int64_t) n_embd, (int64_t) n_ff, (int64_t) (hparams.n_head(0) * hparams.n_embd_head_k(0)), (int64_t) hparams.n_embd_head_k(0)}) {
+            if (norm_scale.count(n) == 0) {
+                ggml_tensor * t = create_tensor(tn(LLM_TENSOR_DORY_NORM_SCALE, std::to_string(n).c_str()), {n}, TENSOR_NOT_REQUIRED);
+                if (t) {
+                    norm_scale[n] = t;
+                }
+            }
+        }
+    }
     scale.resize(n_layer);
     std::vector<int> first(pattern.size(), -1);
     for (int il = 0; il < n_layer; ++il) {
@@ -130,7 +141,14 @@ llama_model_dory::graph::graph(const llama_model_dory & model, const llm_graph_p
     auto * attn = build_attn_inp_kv_iswa();
     ggml_tensor * input_h = nullptr;
     const int recurrent_end = model.n_input + model.n_recurrent * model.n_loops;
-    const auto norm = [&](ggml_tensor * x) { return build_gdn_l2_norm(ctx0, x, 1e-6f); };
+    // With a stored 1/sqrt(n) vector, the norm is RMS_NORM then MUL, which the backend can fuse into one op.
+    const auto norm = [&](ggml_tensor * x) {
+        auto it = model.norm_scale.find(x->ne[0]);
+        if (it == model.norm_scale.end()) {
+            return build_gdn_l2_norm(ctx0, x, 1e-6f);
+        }
+        return ggml_mul(ctx0, ggml_rms_norm(ctx0, x, 1e-6f / x->ne[0]), it->second);
+    };
     const auto f32 = [&](ggml_tensor * x) { return x->type == GGML_TYPE_F32 ? x : ggml_cast(ctx0, x, GGML_TYPE_F32); };
 
     for (int il = 0; il < n_layer; ++il) {
@@ -162,7 +180,8 @@ llama_model_dory::graph::graph(const llama_model_dory & model, const llm_graph_p
                 k = ggml_rope_ext(ctx0, k, pos, nullptr, hd, rope_type, n_ctx_orig, theta, 1.0f, 0.0f, 1.0f, 0.0f, 0.0f);
             }
             auto * sq = model.scales_folded ? s.sqk : ggml_sqr(ctx0, ggml_scale(ctx0, f32(s.sqk), sqrtf(hd) / model.init_std));
-            q = ggml_mul(ctx0, norm(q), ggml_reshape_3d(ctx0, sq, hd, nh, 1));
+            ggml_tensor * qn = model.qk_norm_folded ? ggml_rms_norm(ctx0, q, 1e-6f / hd) : norm(q);
+            q = ggml_mul(ctx0, qn, ggml_reshape_3d(ctx0, sq, hd, nh, 1));
             k = norm(k);
             auto * gate = build_lora_mm(l.wqkv_gate, cur);
             auto * sg = model.scales_folded ? s.gate : ggml_sqr(ctx0, ggml_scale(ctx0, f32(s.gate), sqrtf(model.gate_init) / model.init_std));

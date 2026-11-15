@@ -8,6 +8,7 @@ void llama_model_dory::load_arch_hparams(llama_model_loader & ml) {
     ml.get_key(LLM_KV_OUTPUT_LAYER_COUNT, n_output);
     ml.get_key(LLM_KV_NUM_LOOPS, n_loops);
     ml.get_key(LLM_KV_RECURRENT_KV_CACHE_MODE, recurrent_kv_cache_mode, false);
+    ml.get_key(LLM_KV_SCALES_FOLDED, scales_folded, false);
     if (recurrent_kv_cache_mode != "per_loop" && recurrent_kv_cache_mode != "last_loop") {
         throw std::runtime_error("Dory recurrent_kv_cache_mode must be per_loop or last_loop");
     }
@@ -27,7 +28,7 @@ void llama_model_dory::load_arch_hparams(llama_model_loader & ml) {
 
     const uint64_t n_physical = uint64_t(n_input) + n_recurrent + n_output;
     const uint64_t n_virtual = uint64_t(n_input) + uint64_t(n_recurrent)*n_loops + n_output;
-    if (!n_input || !n_recurrent || !n_output || !n_loops || n_loops > 4 ||
+    if (!n_input || !n_recurrent || !n_output || !n_loops ||
             n_virtual > LLAMA_MAX_LAYERS || n_physical != hparams.n_layer_all ||
             pattern.size() != n_physical || profile.size() != n_physical ||
             pattern.find_first_not_of("S*-") != std::string::npos ||
@@ -146,8 +147,8 @@ llama_model_dory::graph::graph(const llama_model_dory & model, const llm_graph_p
         if (model.pattern[p] == '-') {
             auto * g = build_lora_mm(l.ffn_gate, cur);
             auto * u = build_lora_mm(l.ffn_up, cur);
-            g = ggml_mul(ctx0, g, ggml_scale(ctx0, f32(s.suv_gate), sqrtf(n_embd)));
-            u = ggml_mul(ctx0, u, ggml_scale(ctx0, f32(s.suv_up), sqrtf(n_embd)));
+            g = ggml_mul(ctx0, g, (model.scales_folded ? s.suv_gate : ggml_scale(ctx0, f32(s.suv_gate), sqrtf(n_embd))));
+            u = ggml_mul(ctx0, u, (model.scales_folded ? s.suv_up : ggml_scale(ctx0, f32(s.suv_up), sqrtf(n_embd))));
             cur = norm(ggml_mul(ctx0, ggml_silu(ctx0, g), u));
             cur = build_lora_mm(l.ffn_down, cur);
         } else {
@@ -160,11 +161,11 @@ llama_model_dory::graph::graph(const llama_model_dory & model, const llm_graph_p
                 q = ggml_rope_ext(ctx0, q, pos, nullptr, hd, rope_type, n_ctx_orig, theta, 1.0f, 0.0f, 1.0f, 0.0f, 0.0f);
                 k = ggml_rope_ext(ctx0, k, pos, nullptr, hd, rope_type, n_ctx_orig, theta, 1.0f, 0.0f, 1.0f, 0.0f, 0.0f);
             }
-            auto * sq = ggml_sqr(ctx0, ggml_scale(ctx0, f32(s.sqk), sqrtf(hd) / model.init_std));
+            auto * sq = model.scales_folded ? s.sqk : ggml_sqr(ctx0, ggml_scale(ctx0, f32(s.sqk), sqrtf(hd) / model.init_std));
             q = ggml_mul(ctx0, norm(q), ggml_reshape_3d(ctx0, sq, hd, nh, 1));
             k = norm(k);
             auto * gate = build_lora_mm(l.wqkv_gate, cur);
-            auto * sg = ggml_sqr(ctx0, ggml_scale(ctx0, f32(s.gate), sqrtf(model.gate_init) / model.init_std));
+            auto * sg = model.scales_folded ? s.gate : ggml_sqr(ctx0, ggml_scale(ctx0, f32(s.gate), sqrtf(model.gate_init) / model.init_std));
             gate = ggml_sigmoid(ctx0, ggml_mul(ctx0, gate, sg));
             // Repeated writes replace only the current chunk; older tokens retain final-loop KV.
             cur = build_attn(attn, nullptr, nullptr, nullptr, q, k, v, nullptr, nullptr, nullptr, 1.0f / sqrtf(hd), model.cache_layer[il]);
@@ -173,7 +174,7 @@ llama_model_dory::graph::graph(const llama_model_dory & model, const llm_graph_p
         }
         auto * a = norm(residual);
         auto * b = norm(cur);
-        auto * alpha = ggml_abs(ctx0, ggml_scale(ctx0, f32(s.alpha), model.alpha_init / model.init_std));
+        auto * alpha = model.scales_folded ? s.alpha : ggml_abs(ctx0, ggml_scale(ctx0, f32(s.alpha), model.alpha_init / model.init_std));
         cur = norm(ggml_add(ctx0, a, ggml_mul(ctx0, ggml_sub(ctx0, b, a), alpha)));
         if (il >= (int) model.n_input && il < recurrent_end && (il + 1 - model.n_input) % model.n_recurrent == 0) {
             cur = norm(cur);
@@ -186,7 +187,7 @@ llama_model_dory::graph::graph(const llama_model_dory & model, const llm_graph_p
     res->t_embd = cur;
     cb(cur, "result_norm", -1);
     cur = build_lora_mm(model.output, cur);
-    cur = ggml_mul(ctx0, cur, ggml_scale(ctx0, f32(model.logit_scale), 1.0f / model.init_std));
+    cur = ggml_mul(ctx0, cur, (model.scales_folded ? model.logit_scale : ggml_scale(ctx0, f32(model.logit_scale), 1.0f / model.init_std)));
     cb(cur, "result_output", -1);
     res->t_logits = cur;
     ggml_build_forward_expand(gf, cur);

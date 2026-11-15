@@ -151,6 +151,7 @@ struct llama_model_dory : public llama_model_base {
     float theta_1 = 0.0f, theta_2 = 0.0f;
     std::string pattern;
     std::string recurrent_kv_cache_mode = "per_loop";
+    bool scales_folded = false; // the GGUF holds the derived scale vectors in F32
     std::vector<uint32_t> profile;
     std::vector<int> physical;
     std::vector<int> cache_layer;

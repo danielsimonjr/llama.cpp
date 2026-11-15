@@ -257,6 +257,7 @@ static const std::map<llm_kv, const char *> LLM_KV_NAMES = {
     { LLM_KV_RECURRENT_LAYER_COUNT,             "%s.recurrent_layer_count"             },
     { LLM_KV_OUTPUT_LAYER_COUNT,                "%s.output_layer_count"                },
     { LLM_KV_RECURRENT_KV_CACHE_MODE,            "%s.recurrent_kv_cache_mode"            },
+    { LLM_KV_SCALES_FOLDED,                      "%s.scales_folded"                      },
     { LLM_KV_LAYER_PATTERN,                     "%s.layer_pattern"                     },
     { LLM_KV_ROPE_PROFILE,                      "%s.rope.profile"                      },
     { LLM_KV_ROPE_FREQ_BASE_2,                   "%s.rope.freq_base_2"                   },

@@ -205,14 +205,15 @@ class Inkling2Model(TextModel):
                     if t.dtype != torch.float32 or tuple(t.shape) != expected:
                         raise ValueError(f"Inkling2: {companion}: expected F32 {expected}, got {t.dtype} {tuple(t.shape)}")
             if nvfp4 and self._native_nvfp4:
-                a = LazyTorchTensor.to_eager(amax()).numpy().astype(np.float32)
+                assert amax is not None and denominator is not None
+                a =LazyTorchTensor.to_eager(amax()).numpy().astype(np.float32)
                 d = LazyTorchTensor.to_eager(denominator()).numpy().astype(np.float32)
                 if not np.isfinite(a).all() or (a < 0).any() or not np.isfinite(d).all() or (d <= 0).any():
                     raise ValueError(f"Inkling2: {name}: amax must be finite and nonnegative, the denominator finite and positive")
                 byte_shape = (experts, rows, cols // 64 * 36)
                 if cols % 64:
                     raise ValueError(f"Inkling2: {name}: {cols} columns do not form NVFP4 blocks of 64")
-                chunks_native = [partial(_nvfp4_expert, weight, scale, name, expert, w13) for expert in range(experts)]
+                chunks_native: list[Callable[[], np.ndarray]] = [partial(_nvfp4_expert, weight, scale, name, expert, w13) for expert in range(experts)]
                 self._native_experts[name] = (gguf.LazyChunkedTensor(chunks_native, byte_shape, np.uint8), a / d)
                 self.model_tensors[name] = lambda shape=shape: torch.empty(shape, dtype=torch.float32, device="meta")
                 for companion in required:
